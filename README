@@ -1,0 +1,10 @@
+This is the file for the Deep Learning project of master IASD 2020-2021
+
+To get you started type:
+
+./compile.sh
+python golois.py
+
+You have trained your first Go network!
+
+To participate to the tournament upload a h5 network with less than 1 000 000 parameters
