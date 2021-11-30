@@ -3,7 +3,7 @@ This is the file for the Deep Learning project of master IASD 2020-2021
 To get you started type:
 
 ./compile.sh
-python golois.py
+python mon_golois.py
 
 You have trained your first Go network!
 
