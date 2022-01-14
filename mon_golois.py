@@ -4,16 +4,17 @@ import numpy as np
 from tensorflow.keras import layers 
 from tensorflow.keras import regularizers
 from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+from keras import backend as K
 
 import golois
 
 planes = 31
 moves = 361
 N = 10000
-epochs = 5
+epochs = 50
 batch = 128
-filters = 32
-expand = 128
+filters = 16
+expand = filters*4
 
 
 input_data = np.random.randint(2, size=(N, 19, 19, planes))
@@ -34,41 +35,84 @@ groups = groups.astype ('float32')
 print ("getValidation", flush = True)
 golois.getValidation (input_data, policy, value, end)
 
-def bottleneck_block(x, expand=expand, squeeze=filters):
+def hard_sigmoid(x):
+    return layers.ReLU(6.)(x + 3.) * (1. / 6.)
+
+
+def hard_swish(x):
+    return layers.Multiply()([layers.Activation(hard_sigmoid)(x), x])
+
+def SE_Block(t,filters,ratio=4):
+  se_shape= (1,1,filters)
+  se = layers.GlobalAveragePooling2D()(t)
+  se = layers.Reshape(se_shape)(se)
+  se = layers.Dense(filters // ratio,use_bias=False)(se)
+  se = layers.Activation('ReLU')(se)
+  se = layers.Dense(filters, use_bias=False)(se)
+  se = layers.Activation(hard_sigmoid)(se)
+  x = layers.multiply([t,se])
+
+  return x
+
+
+def bottleneck_block(x, kernel_size,expand=expand, squeeze=filters,activation=hard_swish,SE=True):
     m = layers.Conv2D(expand, (1,1), kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(x)
+    m = layers.Activation(activation)(m)
     m = layers.BatchNormalization()(m)
-    m = layers.Activation('relu')(m)
-    m1 = layers.DepthwiseConv2D((3,3), padding='same', kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
-    m2= layers.DepthwiseConv2D((1,1), padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
-    m3= layers.DepthwiseConv2D((5,5),padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
-    m4= layers.DepthwiseConv2D((7,7),padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
-    m1 = layers.BatchNormalization()(m1)
-    m1 = layers.Activation('relu')(m1)
-    m2 = layers.BatchNormalization()(m2)
-    m2 = layers.Activation('relu')(m2)
-    m3 = layers.BatchNormalization()(m3)
-    m3 = layers.Activation('relu')(m3)
-    m4 = layers.BatchNormalization()(m4)
-    m4 = layers.Activation('relu')(m4)
-    m = layers.Concatenate(axis=-1)([m1, m2,m3,m4])
+    m = layers.Activation(activation)(m)
+    m = layers.DepthwiseConv2D(kernel_size, padding='same', kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
+    #m2= layers.DepthwiseConv2D((1,1), padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
+    #m3= layers.DepthwiseConv2D((5,5),padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
+    #m4= layers.DepthwiseConv2D((7,7),padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
+    m = layers.BatchNormalization()(m)
+    m = layers.Activation(activation)(m)
+    #m2 = layers.BatchNormalization()(m2)
+    #m2 = layers.Activation(activation)(m2)
+    #m3 = layers.BatchNormalization()(m3)
+    #m3 = layers.Activation('swish')(m3)
+    #m4 = layers.BatchNormalization()(m4)
+    #m4 = layers.Activation('swish')(m4)
+    #m = layers.Concatenate(axis=-1)([m1, m2,m3,m4])
+    if SE:
+      m = SE_Block(m,expand)
+    #m = layers.Concatenate(axis=-1)([m1, m2])
     m = layers.Conv2D(squeeze, (1,1), kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
     m = layers.BatchNormalization()(m)
-    m = layers.Add()([m, x])
-    m = layers.BatchNormalization()(m)
-    m = layers.Activation('relu')(m)
-   
+    if squeeze == x.shape[-1]:
+      m = layers.Add()([m, x])
     return m
 
 def buildModel(batch,epochs,filters,expand):
   input = keras.Input(shape=(19, 19, planes), name='board')
-  x = layers.Conv2D(filters, 1, activation='relu', padding='same')(input)
-  for i in range (30):
-      x = bottleneck_block(x,expand,filters)
-  policy_head = layers.Conv2D(1, 1, activation='relu', padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(x)
+  x = layers.Conv2D(filters, (3, 3), padding='same')(input)
+  x = layers.Activation(hard_swish)(x)
+
+  x = bottleneck_block(x,3,expand=filters,activation='ReLU')
+  x = bottleneck_block(x,3,activation='ReLU',SE=False)
+  x = bottleneck_block(x,3,expand=72,squeeze=24,activation='ReLU',SE=False)
+  x = bottleneck_block(x,5,expand=88,squeeze=24,activation='ReLU',SE=False)
+  x = bottleneck_block(x,5,expand=96,squeeze=40)
+  x = bottleneck_block(x,5,expand=240,squeeze=40)
+  x = bottleneck_block(x,5,expand=240,squeeze=40)
+  x = bottleneck_block(x,5,expand=120,squeeze=48)
+  x = bottleneck_block(x,5,expand=156,squeeze=48)
+  x = bottleneck_block(x,5,expand=312,squeeze=96)
+  x = bottleneck_block(x,5,expand=624,squeeze=96)
+  x = bottleneck_block(x,5,expand=624,squeeze=96)
+
+  policy_head = layers.Conv2D(1, 1, padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(x)
+  policy_head = layers.BatchNormalization()(policy_head)
+  policy_head = layers.Activation(hard_swish)(policy_head)
+  #policy_head = layers.AveragePooling2D()(policy_head)
+  policy_head = layers.Conv2D(1, 1, padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(policy_head)
+  policy_head = layers.Activation(hard_swish)(policy_head)
+  policy_head = layers.Conv2D(1, 1, padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(policy_head)
   policy_head = layers.Flatten()(policy_head)
   policy_head = layers.Activation('softmax', name='policy')(policy_head)
+
   value_head = layers.GlobalAveragePooling2D()(x)
-  value_head = layers.Dense(50, activation='relu', kernel_regularizer=regularizers.l2(0.0001))(value_head)
+  value_head = layers.Dense(200, kernel_regularizer=regularizers.l2(0.0001))(value_head)
+  value_head = layers.Activation(hard_swish)(value_head)
   value_head = layers.Dense(1, activation='sigmoid', name='value', kernel_regularizer=regularizers.l2(0.0001))(value_head)
 
   model = keras.Model(inputs=input, outputs=[policy_head, value_head])
@@ -79,7 +123,11 @@ model=buildModel(batch,epochs,filters,expand)
 
 model.summary ()
 
-model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.005, momentum=0.9),
+optimizer=tf.keras.optimizers.Nadam(
+    learning_rate=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-07, name="Nadam"
+)
+
+model.compile(optimizer=optimizer,
               loss={'policy': 'categorical_crossentropy', 'value': 'binary_crossentropy'},
               loss_weights={'policy' : 1.0, 'value' : 1.0},
               metrics={'policy': 'categorical_accuracy', 'value': 'mse'})
@@ -87,25 +135,34 @@ model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.005, momentum=0.9),
 
 
 filepath = 'Mkt_model.hdf5'
-checkpoint = ModelCheckpoint(filepath=filepath, 
-                             monitor='val_loss',
-                             verbose=1, 
+
+filepath = '/content/drive/MyDrive/DeepGo/Mkt_MobileNetv3.h5'
+
+checkpoint = ModelCheckpoint(filepath=filepath,
+                             monitor='policy_loss',
+                             verbose=1,
                              save_best_only=True,
                              mode='min')
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1,
-                              patience=5, min_lr=0.00001)
-callbacks = [checkpoint,reduce_lr]
+callbacks = [checkpoint]
 
-for i in range (1, epochs + 1):
-    print ('epoch ' + str (i))
-    golois.getBatch (input_data, policy, value, end, groups, i * N)
+T_max=1001
+eta_max=1e-3
+eta_min=1e-7
+for epoch in range (1, T_max):
+    print ('epoch ' + str (epoch))
+    golois.getBatch(input_data, policy, value, end, groups, epoch * N)
+    lr = eta_min + (eta_max - eta_min) * (1 + np.cos(np.pi * epoch / T_max)) / 2
+    K.set_value(model.optimizer.learning_rate, lr)
     history = model.fit(input_data,
-                        {'policy': policy, 'value': value}, 
-                        epochs=1, batch_size=batch)
-    if (i % 2 == 0):
+                        {'policy': policy, 'value': value},
+                        epochs=1, batch_size=batch,callbacks=callbacks)
+    if (epoch % 2 == 0):
         golois.getValidation (input_data, policy, value, end)
         val = model.evaluate (input_data,
                               [policy, value], verbose = 0, batch_size=batch)
-        print ("val =", val)
+        print('------------------------------------------------------------------------------------------------------------')
+        print (f"Loss {val[0]:.5f} | Policy loss {val[1]:.5f} | Value loss {val[2]:.5f} | Policy acc {val[3]:.5f} | Value MSE {val[4]:.5f} ")
+        print('------------------------------------------------------------------------------------------------------------')
+
 
 #model.save ('test.h5')
