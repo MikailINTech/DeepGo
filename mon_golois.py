@@ -49,24 +49,24 @@ def SE_Block(t,filters,ratio=4):
   se = layers.Dense(filters // ratio,use_bias=False)(se)
   se = layers.Activation('ReLU')(se)
   se = layers.Dense(filters, use_bias=False)(se)
-  se = layers.Activation(hard_sigmoid)(se)
+  se = layers.Activation(tf.keras.activations.swish)(se)
   x = layers.multiply([t,se])
 
   return x
 
 
-def bottleneck_block(x, kernel_size,expand=expand, squeeze=filters,activation=hard_swish,SE=True):
+def bottleneck_block(x, kernel_size,expand=expand, squeeze=filters,activation=tf.keras.activations.swish,SE=True):
     m = layers.Conv2D(expand, (1,1), kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(x)
     m = layers.Activation(activation)(m)
     m = layers.BatchNormalization()(m)
     m = layers.Activation(activation)(m)
     m = layers.DepthwiseConv2D(kernel_size, padding='same', kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
-    #m2= layers.DepthwiseConv2D((1,1), padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
+    m2= layers.DepthwiseConv2D((1,1), padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
     #m3= layers.DepthwiseConv2D((5,5),padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
     #m4= layers.DepthwiseConv2D((7,7),padding='same',kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
     m = layers.BatchNormalization()(m)
     m = layers.Activation(activation)(m)
-    #m2 = layers.BatchNormalization()(m2)
+    m2 = layers.BatchNormalization()(m2)
     #m2 = layers.Activation(activation)(m2)
     #m3 = layers.BatchNormalization()(m3)
     #m3 = layers.Activation('swish')(m3)
@@ -75,7 +75,7 @@ def bottleneck_block(x, kernel_size,expand=expand, squeeze=filters,activation=ha
     #m = layers.Concatenate(axis=-1)([m1, m2,m3,m4])
     if SE:
       m = SE_Block(m,expand)
-    #m = layers.Concatenate(axis=-1)([m1, m2])
+    m = layers.Concatenate(axis=-1)([m, m2])
     m = layers.Conv2D(squeeze, (1,1), kernel_regularizer=regularizers.l2(0.0001), use_bias = False)(m)
     m = layers.BatchNormalization()(m)
     if squeeze == x.shape[-1]:
@@ -84,35 +84,33 @@ def bottleneck_block(x, kernel_size,expand=expand, squeeze=filters,activation=ha
 
 def buildModel(batch,epochs,filters,expand):
   input = keras.Input(shape=(19, 19, planes), name='board')
-  x = layers.Conv2D(filters, (3, 3), padding='same')(input)
-  x = layers.Activation(hard_swish)(x)
+  x = layers.Conv2D(filters, (3, 3), padding='same',activation=tf.keras.activations.swish)(input)
 
   x = bottleneck_block(x,3,expand=filters,activation='ReLU')
   x = bottleneck_block(x,3,activation='ReLU',SE=False)
   x = bottleneck_block(x,3,expand=72,squeeze=24,activation='ReLU',SE=False)
   x = bottleneck_block(x,5,expand=88,squeeze=24,activation='ReLU',SE=False)
   x = bottleneck_block(x,5,expand=96,squeeze=40)
-  x = bottleneck_block(x,5,expand=240,squeeze=40)
-  x = bottleneck_block(x,5,expand=240,squeeze=40)
+  x = bottleneck_block(x,5,expand=192,squeeze=40)
+  x = bottleneck_block(x,5,expand=192,squeeze=40)
   x = bottleneck_block(x,5,expand=120,squeeze=48)
   x = bottleneck_block(x,5,expand=156,squeeze=48)
   x = bottleneck_block(x,5,expand=312,squeeze=96)
-  x = bottleneck_block(x,5,expand=624,squeeze=96)
-  x = bottleneck_block(x,5,expand=624,squeeze=96)
+  x = bottleneck_block(x,5,expand=564,squeeze=96)
+  x = bottleneck_block(x,5,expand=564,squeeze=96)
 
   policy_head = layers.Conv2D(1, 1, padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(x)
   policy_head = layers.BatchNormalization()(policy_head)
-  policy_head = layers.Activation(hard_swish)(policy_head)
+  policy_head = layers.Activation(tf.keras.activations.swish)(policy_head)
   #policy_head = layers.AveragePooling2D()(policy_head)
   policy_head = layers.Conv2D(1, 1, padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(policy_head)
-  policy_head = layers.Activation(hard_swish)(policy_head)
+  policy_head = layers.Activation(tf.keras.activations.swish)(policy_head)
   policy_head = layers.Conv2D(1, 1, padding='same', use_bias = False, kernel_regularizer=regularizers.l2(0.0001))(policy_head)
   policy_head = layers.Flatten()(policy_head)
   policy_head = layers.Activation('softmax', name='policy')(policy_head)
 
   value_head = layers.GlobalAveragePooling2D()(x)
-  value_head = layers.Dense(200, kernel_regularizer=regularizers.l2(0.0001))(value_head)
-  value_head = layers.Activation(hard_swish)(value_head)
+  value_head = layers.Dense(200, kernel_regularizer=regularizers.l2(0.0001),activation=tf.keras.activations.swish)(value_head)
   value_head = layers.Dense(1, activation='sigmoid', name='value', kernel_regularizer=regularizers.l2(0.0001))(value_head)
 
   model = keras.Model(inputs=input, outputs=[policy_head, value_head])
