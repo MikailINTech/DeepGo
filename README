@@ -7,4 +7,3 @@ python mon_golois.py
 
 You have trained your first Go network!
 
-To participate to the tournament upload a h5 network with less than 1 000 000 parameters
