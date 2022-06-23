@@ -6,3 +6,5 @@ To get you started type:
 
 ./compile.sh
 python mon_golois.py
+ 
+ or simply run the DeepGo.ipynb notebook 
