@@ -1,9 +1,8 @@
 This is the file for the Deep Learning project of master IASD 2020-2021
 
+The aim was to train a model to predict winning chances and best policy for the game of Go.
+
 To get you started type:
 
 ./compile.sh
 python mon_golois.py
-
-You have trained your first Go network!
-
